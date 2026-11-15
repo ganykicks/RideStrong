@@ -21,7 +21,7 @@ export function installRideStrongCloud(api) {
     '<p class="muted" style="font-size:13px">Use the same email on all devices. Offline edits synchronize when you reconnect. If you already used RideStrong before signing in, import those records once with the button above.</p>';
   heading.insertAdjacentElement('afterend',view);
   const $=id=>document.getElementById(id);
-  let active=null,version=0, running=false,queued=false;
+  let active=null,version=0, running=false,queued=false,initialized=false;
   const accountKey=id=>'ridestrong_v3_cloud_'+id;
   const when=r=>Date.parse(r?.updatedAt||'')||0;
   const status=s=>$('syncStatus').textContent=s;
@@ -32,7 +32,8 @@ export function installRideStrongCloud(api) {
   const showLegacy=()=>{let n=legacyCount();$('syncLegacy').style.display=active&&n?'inline-block':'none';$('syncLegacy').textContent='Import '+n+' earlier record(s) from this browser';};
   async function identity(user) {
     const prior=active?.id;
-    if (user?.id===prior) return;
+    if (initialized && user?.id===prior) return;
+    initialized=true;
     version++;active=user||null;
     if (!user){
       window.rideStrongScopedKey=null;
