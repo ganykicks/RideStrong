@@ -108,12 +108,14 @@ export function installRideStrongCloud(api) {
       if(!api.validKey(k)||!api.validRecord(rec))continue;
       if(when(rec)>when(current[k])){current[k]=rec;added++;}
     }
+    if(!added){status('No newer browser records to import.');return;}
+    if(!confirm('Import '+added+' previously saved browser record(s) into this signed-in account? Your original guest records will be preserved.'))return;
     api.setRecords(current);api.persist();
     showLegacy();status(added+' earlier records added to this account. Syncing…');
   };
   window.addEventListener('online',()=>{queued=true;void synchronize();});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){queued=true;void synchronize();}});
   db.auth.onAuthStateChange((_event,session)=>{setTimeout(()=>{void identity(session?.user||null);},0);});
-  void db.auth.getUser().then(({data,error})=>{if(error){status('Sign-in check failed: '+error.message);return;}void identity(data.user);})
+  void db.auth.getSession().then(({data,error})=>{if(error){status('Sign-in check failed: '+error.message);return;}void identity(data.session?.user||null);})
     .catch(e=>status('Cloud initialization error: '+e.message));
 }
