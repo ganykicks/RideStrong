@@ -51,27 +51,53 @@ def fetch_stem(key):
         return np.frombuffer(wf.readframes(wf.getnframes()),dtype=np.int16).astype(np.float32)/32768.
 
 def split_countdown(sig):
-    """Detect 31 separate spoken numbers using short pauses between period-separated words."""
+    """Segment the 31 generated words using quiet gaps, merging syllable boundaries.
+    Preserve each spoken word's real speed; place the extracted words at exact
+    seconds on the final timeline. Never stretch the narrator's pitch or cadence.
+    """
     n=len(sig)
-    for threshold in (0.018,0.014,0.024,0.010,0.032,0.006):
-        for glue in (0.08,0.06,0.10,0.045,0.12):
-            hop=240
-            size=n//hop
-            rms=np.sqrt(np.mean(sig[:size*hop].reshape(size,hop)**2,axis=1))
-            active=np.where(rms>max(0.003,float(np.max(rms))*threshold))[0]
-            if len(active)==0: continue
+    hop=120
+    m=n//hop
+    env=np.sqrt(np.mean(sig[:m*hop].reshape(m,hop)**2,axis=1))
+    smoothed=np.convolve(env,np.ones(5,dtype=np.float32)/5,mode="same")
+    peak=float(np.max(smoothed))
+    candidates=[]
+    for fraction in (.012,.018,.025,.035,.045,.065,.09,.12,.20):
+        for glue in (.01,.018,.025,.035,.045,.060,.08,.10,.13):
+            threshold=max(.002,peak*fraction)
+            active=np.where(smoothed>threshold)[0]
+            if len(active)==0:continue
             groups=[]
             start=last=int(active[0])
-            for f in active[1:]:
-                f=int(f)
-                if (f-last)*hop/SR > glue:
-                    if (last-start)*hop/SR > .11: groups.append((start,last))
+            for raw in active[1:]:
+                f=int(raw)
+                if (f-last)*hop/SR>glue:
+                    if (last-start)*hop/SR>.060:groups.append([start,last])
                     start=f
                 last=f
-            if (last-start)*hop/SR > .11:groups.append((start,last))
-            if len(groups)==31:
-                return [sig[max(0,int(a*hop-.028*SR)):min(n,int((b+1)*hop+.028*SR))].copy() for a,b in groups]
-    raise RuntimeError("Could not isolate all 31 countdown numbers. Check voice source; refusing to generate unsynchronized rest audio.")
+            if (last-start)*hop/SR>.060:groups.append([start,last])
+            if len(groups)>=31:
+                # Smaller silent gaps are more likely pauses *within* a word.
+                # Prefer modest over-segmentation to avoid swallowing adjacent words.
+                excess=len(groups)-31
+                if excess<=20:
+                    candidates.append((excess,fraction,glue,groups))
+    if not candidates:
+        raise RuntimeError("Voice count segmentation yielded fewer than 31 detected word groups; cannot guarantee an aligned countdown.")
+    excess,fraction,glue,groups=min(candidates,key=lambda x:(x[0],abs(x[2]-.045),abs(x[1]-.035)))
+    while len(groups)>31:
+        gaps=[(groups[j+1][0]-groups[j][1],j) for j in range(len(groups)-1)]
+        _,j=min(gaps)
+        groups[j:j+2]=[[groups[j][0],groups[j+1][1]]]
+    # Protect phrase boundaries; <= 25ms fade is added during final placement.
+    words=[]
+    for a,b in groups:
+        left=max(0,int(a*hop-.022*SR))
+        right=min(n,int((b+1)*hop+.022*SR))
+        words.append(sig[left:right].copy())
+    print("Aligned 31 spoken counts", "segments", len(words),
+          "longest_sec",round(max(len(w)/SR for w in words),2),flush=True)
+    return words
 
 def write_wav(path, signal):
     signal=np.clip(signal,-0.98,0.98)
